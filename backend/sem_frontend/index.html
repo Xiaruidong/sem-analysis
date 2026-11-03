@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>SEM 定量分析</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", sans-serif; background: #f0f2f5; color: #333; padding: 20px; }
+  h1 { font-size: 20px; margin-bottom: 16px; }
+  .panel { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .panel h2 { font-size: 15px; margin-bottom: 12px; color: #1a6dcc; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  input[type=text] { flex: 1; min-width: 320px; padding: 7px 10px; border: 1px solid #ccc; border-radius: 5px; }
+  button { padding: 7px 18px; border: none; border-radius: 5px; background: #1a6dcc; color: #fff; cursor: pointer; }
+  button:disabled { background: #aaa; cursor: not-allowed; }
+  button.ghost { background: #fff; color: #1a6dcc; border: 1px solid #1a6dcc; }
+  label.chk { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+  select, input[type=number] { padding: 6px 8px; border: 1px solid #ccc; border-radius: 5px; }
+  .image-grid { display: flex; flex-wrap: wrap; gap: 8px; max-height: 220px; overflow-y: auto; border: 1px solid #eee; border-radius: 6px; padding: 8px; }
+  .img-item { padding: 5px 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 13px; cursor: pointer; user-select: none; background: #fafafa; }
+  .img-item.sel { background: #1a6dcc; color: #fff; border-color: #1a6dcc; }
+  .img-item .warn { color: #e67e22; }
+  .img-item.sel .warn { color: #ffd; }
+  .stats { display: flex; gap: 12px; flex-wrap: wrap; margin: 10px 0; }
+  .stat-card { background: #f6f9ff; border-radius: 6px; padding: 10px 18px; text-align: center; min-width: 100px; }
+  .stat-card .v { font-size: 20px; font-weight: 600; color: #1a6dcc; }
+  .stat-card .k { font-size: 12px; color: #888; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 8px; }
+  th, td { border: 1px solid #e5e5e5; padding: 5px 8px; text-align: center; }
+  th { background: #f5f7fa; }
+  canvas { max-width: 100%; background: #fff; }
+  #status { font-size: 13px; color: #666; margin-top: 6px; }
+  .result-imgs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+  .result-imgs img { width: 300px; border: 1px solid #ddd; border-radius: 5px; cursor: pointer; }
+  .flex2 { display: flex; gap: 16px; flex-wrap: wrap; }
+  .flex2 > div { flex: 1; min-width: 340px; }
+</style>
+</head>
+<body>
+<h1>SEM 图像定量分析（颗粒形貌 / 粒度分布）</h1>
+
+<div class="panel">
+  <h2>1. 选择图像目录</h2>
+  <div class="row">
+    <input type="text" id="dir" value="D:\vue_project\jinxiangshibie\SEM">
+    <button onclick="listImages()">浏览</button>
+  </div>
+  <div class="image-grid" id="imgList"></div>
+  <div class="row" style="margin-top:10px">
+    <button class="ghost" onclick="selectAll(true)">全选</button>
+    <button class="ghost" onclick="selectAll(false)">全不选</button>
+    <span id="selCount" style="font-size:13px;color:#666"></span>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>2. 分析类型与参数</h2>
+  <div class="row">
+    <label>分析类型:
+      <select id="analysisType">
+        <option value="particles">① 粉末颗粒统计（颗粒数/D10/D50/D90）</option>
+        <option value="thickness">② 涂层/膜厚（截面层厚）</option>
+        <option value="porosity">③ 孔隙参数（孔隙率/孔径分布）</option>
+      </select>
+    </label>
+    <label>手工标定(μm/px，缺元数据时填): <input type="number" id="manualPx" step="0.001" style="width:90px" title="例: 10μm标尺占37px 则填 0.27"></label>
+    <span id="particleParams">
+    <label class="chk"><input type="checkbox" id="quick" checked> 快速模式（跳过 Feret，仅圈颗粒+等效直径）</label>
+    <label class="chk"><input type="checkbox" id="watershed" checked> 分水岭拆分粘连颗粒</label>
+    <label class="chk"><input type="checkbox" id="annotate" checked> 生成轮廓标注图</label>
+    <label>颗粒明暗:
+      <select id="brightness"><option value="bright">亮（常规 SE 像）</option><option value="dark">暗（孔洞/凹坑）</option></select>
+    </label>
+    <label>二值化方法:
+      <select id="method"><option value="gradient">梯度分水岭（推荐·紧密堆积粉体）</option><option value="otsu">Otsu 全局阈值</option><option value="gap">缝隙法（低对比度）</option></select>
+    </label>
+    <label>最小面积(px): <input type="number" id="minArea" value="150" style="width:70px"></label>
+    <label>最小粒径(μm): <input type="number" id="minDiam" value="0.5" step="0.1" style="width:60px"></label>
+    <label>直方图bin数: <input type="number" id="bins" value="20" style="width:60px"></label>
+    </span>
+    <span id="porosityParams" style="display:none">
+      <label>二值化:
+        <select id="poreMethod"><option value="fixed">固定阈值（黑色占比）</option><option value="otsu">Otsu</option><option value="adaptive">局部自适应</option></select>
+      </label>
+      <label>灰度阈值(<黑色为孔): <input type="number" id="poreThresh" value="100" style="width:60px"></label>
+      <label>最小孔径(μm): <input type="number" id="minPore" value="0.2" step="0.05" style="width:60px"></label>
+      <label>直方图bin数: <input type="number" id="poreBins" value="20" style="width:60px"></label>
+    </span>
+  </div>
+  <button id="runBtn" onclick="runAnalysis()">开始分析</button>
+  <div id="status"></div>
+</div>
+
+<div class="panel" id="resultPanel" style="display:none">
+  <h2>3. 分析结果</h2>
+  <div class="stats" id="overallStats"></div>
+  <div class="flex2">
+    <div><h3 style="font-size:14px;margin-bottom:6px">粒度分布直方图 + 累积曲线</h3><canvas id="histChart" width="640" height="320"></canvas></div>
+    <div><h3 style="font-size:14px;margin-bottom:6px">每张图统计</h3>
+      <div style="max-height:320px;overflow:auto"><table id="imgTable"></table></div>
+    </div>
+  </div>
+  <h3 style="font-size:14px;margin:12px 0 6px">轮廓标注图（点击看大图）</h3>
+  <div class="result-imgs" id="annotatedImgs"></div>
+</div>
+
+<script>
+const API = '';
+let images = [];
+const selected = new Set();
+
+document.getElementById('analysisType').onchange = function () {
+  document.getElementById('particleParams').style.display = this.value === 'particles' ? '' : 'none';
+  document.getElementById('porosityParams').style.display = this.value === 'porosity' ? '' : 'none';
+};
+
+async function listImages() {
+  const dir = document.getElementById('dir').value.trim();
+  const r = await fetch(API + '/api/sem/list_images', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({directory: dir, recursive: true})
+  });
+  if (!r.ok) { alert('加载失败: ' + (await r.text())); return; }
+  const j = await r.json();
+  images = j.images; selected.clear();
+  renderList();
+}
+
+function renderList() {
+  const el = document.getElementById('imgList');
+  el.innerHTML = '';
+  for (const img of images) {
+    const d = document.createElement('div');
+    d.className = 'img-item' + (selected.has(img.path) ? ' sel' : '');
+    d.innerHTML = img.name + (img.has_meta ? '' : ' <span class="warn">无元数据</span>');
+    d.title = img.path;
+    d.onclick = () => { selected.has(img.path) ? selected.delete(img.path) : selected.add(img.path); renderList(); };
+    el.appendChild(d);
+  }
+  document.getElementById('selCount').textContent = `已选 ${selected.size} / ${images.length} 张`;
+}
+
+function selectAll(on) { images.forEach(i => on ? selected.add(i.path) : selected.delete(i.path)); renderList(); }
+
+async function runAnalysis() {
+  if (!selected.size) { alert('请先选择图像'); return; }
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  const type = document.getElementById('analysisType').value;
+  document.getElementById('status').textContent = '分析中...';
+  const t0 = Date.now();
+  try {
+    let url, body;
+    if (type === 'particles') {
+      url = '/api/sem/analyze';
+      body = {
+        image_paths: [...selected],
+        quick: document.getElementById('quick').checked,
+        watershed_split: document.getElementById('watershed').checked,
+        save_annotated: document.getElementById('annotate').checked,
+        brightness: document.getElementById('brightness').value,
+        method: document.getElementById('method').value,
+        min_area_px: +document.getElementById('minArea').value,
+        min_diameter_um: +document.getElementById('minDiam').value || null,
+        bins: +document.getElementById('bins').value,
+        pixel_size_um: +document.getElementById('manualPx').value || null,
+      };
+    } else if (type === 'thickness') {
+      url = '/api/sem/thickness';
+      body = { image_paths: [...selected], orientation: 'auto', pixel_size_um: +document.getElementById('manualPx').value || null };
+    } else {
+      url = '/api/sem/porosity';
+      body = {
+        image_paths: [...selected],
+        method: document.getElementById('poreMethod').value,
+        threshold: +document.getElementById('poreThresh').value,
+        min_diameter_um: +document.getElementById('minPore').value,
+        pixel_size_um: +document.getElementById('manualPx').value || null,
+        bins: +document.getElementById('poreBins').value,
+      };
+    }
+    const r = await fetch(API + url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error(await r.text());
+    const j = await r.json();
+    if (type === 'particles') showParticles(j); else showStruct(j, type);
+    document.getElementById('status').textContent =
+      `完成：${j.image_count} 张，耗时 ${((Date.now()-t0)/1000).toFixed(1)}s` +
+      (j.errors.length ? `；失败 ${j.errors.length} 张` : '');
+  } catch (e) {
+    alert('分析失败: ' + e.message);
+    document.getElementById('status').textContent = '';
+  } finally { btn.disabled = false; }
+}
+
+function showStruct(j, type) {
+  document.getElementById('resultPanel').style.display = '';
+  const box = document.getElementById('imgTable');
+  const statBox = document.getElementById('overallStats');
+  const imgs = document.getElementById('annotatedImgs');
+  imgs.innerHTML = '';
+  if (type === 'thickness') {
+    statBox.innerHTML = '';
+    const rows = ['<tr><th>图像</th><th>层号</th><th>厚度(μm)</th><th>行区间</th><th>灰度均值</th><th>标定(μm/px)</th></tr>'];
+    for (const r of j.results) for (const l of r.layers) {
+      rows.push(`<tr><td>${r.title || ''}</td><td>L${l.layer_index}</td><td>${l.thickness_um}</td><td>${l.row_start}-${l.row_end}</td><td>${l.mean_gray}±${l.gray_std}</td><td>${r.pixel_size_um}</td></tr>`);
+    }
+    box.innerHTML = rows.join('');
+    document.getElementById('histChart').getContext('2d').clearRect(0,0,9999,9999);
+  } else {
+    const first = j.results[0] || {};
+    const cards = [
+      ['孔隙率 (%)', first.porosity_percent], ['孔数', first.pore_count],
+      ['孔D10 (μm)', first.pore_d10_um], ['孔D50 (μm)', first.pore_d50_um],
+      ['孔D90 (μm)', first.pore_d90_um], ['最大孔径 (μm)', first.pore_max_um],
+    ];
+    statBox.innerHTML = cards.map(([k, v]) =>
+      `<div class="stat-card"><div class="v">${v ?? '-'}</div><div class="k">${k}</div></div>`).join('');
+    const rows = ['<tr><th>图像</th><th>孔隙率(%)</th><th>孔数</th><th>D10</th><th>D50</th><th>D90</th><th>标定(μm/px)</th></tr>'];
+    for (const r of j.results) {
+      rows.push(`<tr><td>${r.title || ''}</td><td>${r.porosity_percent}</td><td>${r.pore_count}</td><td>${r.pore_d10_um ?? '-'}</td><td>${r.pore_d50_um ?? '-'}</td><td>${r.pore_d90_um ?? '-'}</td><td>${r.pixel_size_um}</td></tr>`);
+    }
+    box.innerHTML = rows.join('');
+    drawPoreHist(first.pore_hist);
+  }
+  for (const r of j.results) addAnnoImg(r.annotated_image, r.title);
+}
+
+function addAnnoImg(path, title) {
+  if (!path) return;
+  const img = document.createElement('img');
+  img.src = API + '/results/sem/annotated/' + path.split(/[\\\\/]/).pop();
+  img.title = title || '';
+  img.onclick = () => window.open(img.src);
+  document.getElementById('annotatedImgs').appendChild(img);
+}
+
+function drawPoreHist(hist) {
+  const c = document.getElementById('histChart'), ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+  if (!hist || !hist.edges.length) return;
+  const L = 55, T = 15, B = 35;
+  const W = c.width - L - 55, H = c.height - T - B;
+  const edges = hist.edges, counts = hist.counts;
+  const maxD = Math.max(...edges), minD = Math.min(...edges), maxC = Math.max(...counts, 1);
+  const x = d => L + (d - minD) / (maxD - minD) * W;
+  ctx.strokeStyle = '#999'; ctx.beginPath();
+  ctx.moveTo(L, T); ctx.lineTo(L, T + H); ctx.lineTo(L + W, T + H); ctx.stroke();
+  ctx.fillStyle = '#666'; ctx.font = '11px sans-serif';
+  for (let i = 0; i <= 5; i++) {
+    const d = minD + (maxD - minD) * i / 5;
+    ctx.fillText(d.toFixed(2), x(d) - 12, T + H + 16);
+  }
+  for (let i = 0; i <= 4; i++) {
+    const y = T + H - H * i / 4;
+    ctx.fillText(Math.round(maxC * i / 4), 20, y + 4);
+  }
+  const bw = W / counts.length;
+  ctx.fillStyle = 'rgba(255,140,0,.6)';
+  counts.forEach((n, i) => {
+    const hh = n / maxC * H;
+    ctx.fillRect(L + i * bw + 1, T + H - hh, bw - 2, hh);
+  });
+}
+
+function showParticles(j) {
+  document.getElementById('resultPanel').style.display = '';
+  const psd = j.overall_psd;
+  const cards = [
+    ['颗粒总数', psd.count], ['D10 (μm)', psd.d10_um], ['D50 (μm)', psd.d50_um],
+    ['D90 (μm)', psd.d90_um], ['平均粒径 (μm)', psd.mean_um], ['标准差 (μm)', psd.std_um],
+  ];
+  document.getElementById('overallStats').innerHTML = cards.map(([k, v]) =>
+    `<div class="stat-card"><div class="v">${v ?? '-'}</div><div class="k">${k}</div></div>`).join('');
+
+  drawHist(psd);
+
+  const rows = ['<tr><th>图像</th><th>颗粒数</th><th>D10</th><th>D50</th><th>D90</th><th>标定(μm/px)</th><th>放大倍数</th></tr>'];
+  for (const r of j.results) {
+    rows.push(`<tr><td title="${r.image}">${r.title || r.image.split(/[\\\\/]/).pop()}</td>
+      <td>${r.particle_count}</td><td>${r.psd.d10_um ?? '-'}</td><td>${r.psd.d50_um ?? '-'}</td>
+      <td>${r.psd.d90_um ?? '-'}</td><td>${r.pixel_size_um}</td><td>${r.mag ?? '-'}</td></tr>`);
+  }
+  document.getElementById('imgTable').innerHTML = rows.join('');
+
+  const box = document.getElementById('annotatedImgs');
+  box.innerHTML = '';
+  for (const r of j.results) {
+    if (!r.annotated_image) continue;
+    const img = document.createElement('img');
+    img.src = API + '/results/sem/annotated/' + r.annotated_image.split(/[\\\\/]/).pop();
+    img.title = r.title;
+    img.onclick = () => window.open(img.src);
+    box.appendChild(img);
+  }
+}
+
+function drawHist(psd) {
+  const c = document.getElementById('histChart'), ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+  if (!psd.count || !psd.hist.edges.length) return;
+  const L = 55, R = 55, T = 15, B = 35;
+  const W = c.width - L - R, H = c.height - T - B;
+  const edges = psd.hist.edges, counts = psd.hist.counts;
+  const maxD = Math.max(...edges), minD = Math.min(...edges);
+  const maxC = Math.max(...counts, 1);
+  const x = d => L + (d - minD) / (maxD - minD) * W;
+  // 轴
+  ctx.strokeStyle = '#999'; ctx.beginPath();
+  ctx.moveTo(L, T); ctx.lineTo(L, T + H); ctx.lineTo(L + W, T + H); ctx.stroke();
+  ctx.fillStyle = '#666'; ctx.font = '11px sans-serif';
+  for (let i = 0; i <= 5; i++) {
+    const d = minD + (maxD - minD) * i / 5;
+    ctx.fillText(d.toFixed(2), x(d) - 12, T + H + 16);
+  }
+  for (let i = 0; i <= 4; i++) {
+    const y = T + H - H * i / 4;
+    ctx.fillText(Math.round(maxC * i / 4), 18, y + 4);
+  }
+  // 直方图
+  const bw = W / counts.length;
+  ctx.fillStyle = 'rgba(26,109,204,.55)';
+  counts.forEach((n, i) => {
+    const h = n / maxC * H;
+    ctx.fillRect(L + i * bw + 1, T + H - h, bw - 2, h);
+  });
+  // 累积曲线（右轴）
+  if (psd.sorted_diameters && psd.cdf_percent) {
+    const ds = psd.sorted_diameters, cdf = psd.cdf_percent;
+    ctx.strokeStyle = '#e67e22'; ctx.lineWidth = 2; ctx.beginPath();
+    ds.forEach((d, i) => {
+      const px = x(d), py = T + H - cdf[i] / 100 * H;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    });
+    ctx.stroke(); ctx.lineWidth = 1;
+    ctx.fillStyle = '#e67e22';
+    // D10/D50/D90 竖线
+    [[psd.d10_um, 'D10'], [psd.d50_um, 'D50'], [psd.d90_um, 'D90']].forEach(([d, t]) => {
+      if (d == null) return;
+      ctx.strokeStyle = '#c0392b'; ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(x(d), T); ctx.lineTo(x(d), T + H); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillText(t, x(d) + 3, T + 10);
+    });
+  }
+  ctx.fillStyle = '#1a6dcc'; ctx.fillText('频数', 12, 10);
+  ctx.fillStyle = '#e67e22'; ctx.fillText('— 累积 (%)', c.width - 70, 10);
+}
+
+listImages();
+</script>
+</body>
+</html>

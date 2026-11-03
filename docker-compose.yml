@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: jinxiangshibie-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models
+      - ./storage:/app/storage
+      - ./backend/app:/app/app
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_RELOAD=true
+      - API_CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost
+      - DATABASE_URL=sqlite:///./jinxiangshibie.db
+      - REDIS_URL=redis://redis:6379/0
+      - DEVICE=cpu
+      - SAM_MODEL_PATH=/app/models/sam_vit_h_4b8939.pth
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: jinxiangshibie-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: jinxiangshibie-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  models:
+  storage:
